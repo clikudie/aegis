@@ -1,0 +1,17 @@
+services:
+  aegis:
+    image: likudie/aegis:latest
+    container_name: aegis
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      TZ_NAME: America/Los_Angeles
+      STATE_FILE: /data/state.json
+      LG_TV_HOST: 192.168.1.50
+      LG_TV_KEY_FILE: /data/lgtv-key.json
+      POWER_OFF_CMD: "python /app/scripts/lg_poweroff.py"
+    volumes:
+      - ./data:/data

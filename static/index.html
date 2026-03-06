@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aegis</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top-card">
+        <div class="top-main">
+          <p class="label">Certified Home Controls</p>
+          <h1>Aegis</h1>
+          <p class="status">Designed for a better screen-time routine.</p>
+          <p id="status-line" class="status status-live">Loading...</p>
+        </div>
+        <div class="chips">
+          <a class="chip chip-active" href="/">Controls</a>
+          <a class="chip" href="/diagnostics">Diagnostics</a>
+        </div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="summary-card">
+          <p class="summary-label">TV State</p>
+          <p id="summary-tv" class="summary-value">Unknown</p>
+        </article>
+        <article class="summary-card">
+          <p class="summary-label">Schedule</p>
+          <p id="summary-window" class="summary-value">Unknown</p>
+        </article>
+        <article class="summary-card">
+          <p class="summary-label">Override</p>
+          <p id="summary-override" class="summary-value">Unknown</p>
+        </article>
+        <article class="summary-card">
+          <p class="summary-label">Next Shutdown</p>
+          <p id="summary-next-shutdown" class="summary-value">None</p>
+        </article>
+        <article class="summary-card">
+          <p class="summary-label">Last Action</p>
+          <p id="summary-last-action" class="summary-value">None</p>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <h2>Sleep Timer</h2>
+          <p>Set a one-time auto shutoff.</p>
+        </div>
+        <form id="timer-form" class="row timer-row">
+          <label class="field grow-field">
+            Minutes
+            <input id="timer-minutes" type="number" min="1" value="45" required />
+          </label>
+          <button type="submit" class="btn btn-primary">Set Timer</button>
+          <button id="cancel-timer" type="button" class="btn btn-secondary">Cancel Timer</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <h2>Schedule Policy</h2>
+          <p>Define when TV is allowed to stay on.</p>
+        </div>
+        <div class="row policy-row">
+          <label class="field switch-field">
+            Enabled
+            <input id="sched-enabled" type="checkbox" checked />
+          </label>
+          <label class="field">
+            Mode
+            <select id="sched-mode">
+              <option value="strict">strict</option>
+              <option value="graceful">graceful</option>
+            </select>
+          </label>
+          <label class="field">
+            Grace Minutes
+            <input id="sched-grace" type="number" min="0" value="0" />
+          </label>
+        </div>
+
+        <div class="window-builder">
+          <label class="field">
+            Day
+            <select id="win-day">
+              <option>monday</option>
+              <option>tuesday</option>
+              <option>wednesday</option>
+              <option>thursday</option>
+              <option>friday</option>
+              <option selected>saturday</option>
+              <option>sunday</option>
+            </select>
+          </label>
+          <label class="field">
+            Start
+            <input id="win-start" type="time" value="13:00" />
+          </label>
+          <label class="field">
+            End
+            <input id="win-end" type="time" value="15:00" />
+          </label>
+          <button id="add-window" type="button" class="btn btn-secondary">Add Window</button>
+        </div>
+
+        <ul id="windows" class="list"></ul>
+        <button id="save-schedule" type="button" class="btn btn-primary">Save Schedule</button>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <h2>Override</h2>
+          <p>Bypass schedule rules when needed.</p>
+        </div>
+        <div class="row">
+          <button id="override-none" type="button" class="btn btn-secondary">Disable Override</button>
+          <button id="override-perm" type="button" class="btn btn-danger">Permanent Override</button>
+        </div>
+        <form id="override-temp-form" class="row timer-row">
+          <label class="field grow-field">
+            Minutes
+            <input id="override-minutes" type="number" min="1" value="60" required />
+          </label>
+          <button type="submit" class="btn btn-primary">Temporary Override</button>
+        </form>
+      </section>
+
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
