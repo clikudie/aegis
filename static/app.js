@@ -1,19 +1,20 @@
-const stateLine = document.getElementById('status-line');
-const windowsEl = document.getElementById('windows');
-const summaryTv = document.getElementById('summary-tv');
-const summaryWindow = document.getElementById('summary-window');
-const summaryOverride = document.getElementById('summary-override');
-const summaryNextShutdown = document.getElementById('summary-next-shutdown');
-const summaryLastAction = document.getElementById('summary-last-action');
+const actionLine = document.getElementById('action-line');
+const timerStateEl = document.getElementById('timer-state');
+const timerCountdownEl = document.getElementById('timer-countdown');
+const timerEtaEl = document.getElementById('timer-eta');
+const countdownCard = document.getElementById('countdown-card');
+const timerInput = document.getElementById('timer-minutes');
+const ring = document.getElementById('countdown-ring');
 
-let scheduleDraft = {
-  enabled: true,
-  mode: 'strict',
-  grace_minutes: 0,
-  windows: [],
-};
-let scheduleDirty = false;
 let latestStatus = null;
+let timerTotalSeconds = null;
+let lastBeepSecond = null;
+let audioCtx = null;
+
+const RING_RADIUS = 132;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+ring.style.strokeDasharray = `${RING_CIRCUMFERENCE}`;
+ring.style.strokeDashoffset = `${RING_CIRCUMFERENCE}`;
 
 async function api(path, method = 'GET', body = null) {
   const res = await fetch(path, {
@@ -28,165 +29,169 @@ async function api(path, method = 'GET', body = null) {
   return data;
 }
 
-function renderWindows() {
-  windowsEl.innerHTML = '';
-  if (!scheduleDraft.windows.length) {
-    const li = document.createElement('li');
-    const left = document.createElement('span');
-    left.textContent = 'No windows configured yet.';
-    li.appendChild(left);
-    windowsEl.appendChild(li);
-    return;
+function toMMSS(totalSec) {
+  const sec = Math.max(0, Math.floor(totalSec));
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return `${min.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+}
+
+function setRingProgress(progress) {
+  const clamped = Math.min(1, Math.max(0, progress));
+  ring.style.strokeDashoffset = `${RING_CIRCUMFERENCE * (1 - clamped)}`;
+}
+
+function unlockAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  scheduleDraft.windows.forEach((w, i) => {
-    const li = document.createElement('li');
-    const left = document.createElement('span');
-    left.textContent = `${w.day} ${w.start}-${w.end}`;
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.textContent = 'Remove';
-    del.onclick = () => {
-      scheduleDirty = true;
-      scheduleDraft.windows.splice(i, 1);
-      renderWindows();
-    };
-    li.appendChild(left);
-    li.appendChild(del);
-    windowsEl.appendChild(li);
-  });
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
 }
 
-function formatReason(reason) {
-  const map = {
-    timer: 'Timer',
-    schedule_strict: 'Schedule',
-    schedule_graceful: 'Schedule (Grace)',
-  };
-  return map[reason] || 'Policy';
+function beepWarning(remainingSec) {
+  if (!audioCtx || remainingSec < 1 || remainingSec > 10) return;
+  if (lastBeepSecond === remainingSec) return;
+  lastBeepSecond = remainingSec;
+
+  const now = audioCtx.currentTime;
+  const urgent = remainingSec <= 3;
+  const pulseCount = urgent ? 2 : 1;
+  const baseFrequency = urgent ? 1280 : 980;
+  const altFrequency = urgent ? 980 : 780;
+  const pulseGap = urgent ? 0.13 : 0.0;
+  const pulseLength = urgent ? 0.12 : 0.18;
+
+  for (let i = 0; i < pulseCount; i += 1) {
+    const start = now + i * pulseGap;
+    const oscA = audioCtx.createOscillator();
+    const oscB = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    oscA.type = 'triangle';
+    oscB.type = 'sine';
+    oscA.frequency.setValueAtTime(baseFrequency, start);
+    oscB.frequency.setValueAtTime(altFrequency, start);
+
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.16, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + pulseLength);
+
+    oscA.connect(gain);
+    oscB.connect(gain);
+    gain.connect(audioCtx.destination);
+    oscA.start(start);
+    oscB.start(start);
+    oscA.stop(start + pulseLength + 0.01);
+    oscB.stop(start + pulseLength + 0.01);
+  }
 }
 
-function renderNextShutdown() {
+function renderCountdown() {
   if (!latestStatus || !latestStatus.next_shutdown_at) {
-    summaryNextShutdown.textContent = 'None';
+    timerTotalSeconds = null;
+    lastBeepSecond = null;
+    timerStateEl.textContent = 'Idle';
+    timerCountdownEl.textContent = '--:--';
+    timerEtaEl.textContent = 'Set a timer to begin';
+    setRingProgress(0);
+    countdownCard.classList.remove('active', 'warning');
     return;
   }
 
   const now = new Date(latestStatus.now || Date.now());
   const at = new Date(latestStatus.next_shutdown_at);
-  const deltaMs = at.getTime() - now.getTime();
-  const reason = formatReason(latestStatus.next_shutdown_reason);
-
   if (Number.isNaN(at.valueOf())) {
-    summaryNextShutdown.textContent = `Scheduled (${reason})`;
+    timerStateEl.textContent = 'Armed';
+    timerCountdownEl.textContent = '--:--';
+    timerEtaEl.textContent = 'Shutdown scheduled';
+    countdownCard.classList.add('active');
+    countdownCard.classList.remove('warning');
+    setRingProgress(1);
     return;
   }
 
-  if (deltaMs <= 0) {
-    summaryNextShutdown.textContent = `Now (${reason})`;
-    return;
+  const remainingSec = Math.max(0, Math.ceil((at.getTime() - now.getTime()) / 1000));
+  if (timerTotalSeconds == null || remainingSec > timerTotalSeconds) {
+    timerTotalSeconds = remainingSec;
   }
 
-  const totalSec = Math.floor(deltaMs / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  summaryNextShutdown.textContent = `${min}m ${sec.toString().padStart(2, '0')}s (${reason})`;
+  const progress = timerTotalSeconds > 0 ? remainingSec / timerTotalSeconds : 0;
+  setRingProgress(progress);
+
+  timerCountdownEl.textContent = toMMSS(remainingSec);
+  timerEtaEl.textContent = `Shutdown at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+
+  countdownCard.classList.add('active');
+  if (remainingSec <= 10 && remainingSec > 0) {
+    timerStateEl.textContent = 'Final Countdown';
+    countdownCard.classList.add('warning');
+    beepWarning(remainingSec);
+  } else if (remainingSec === 0) {
+    timerStateEl.textContent = 'Shutting Down';
+    countdownCard.classList.add('warning');
+  } else {
+    timerStateEl.textContent = 'Armed';
+    countdownCard.classList.remove('warning');
+  }
 }
 
 async function refresh() {
   try {
     const status = await api('/api/status');
     latestStatus = status;
-    stateLine.textContent = `Live ${new Date(status.now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    stateLine.style.color = '#5b6472';
-    summaryTv.textContent = status.tv_is_on ? 'On' : 'Off';
-    summaryWindow.textContent = status.inside_allowed_window ? 'Allowed' : 'Blocked';
-    summaryOverride.textContent = status.override.mode;
-    renderNextShutdown();
-    summaryLastAction.textContent = status.last_action || 'None';
-
-    if (!scheduleDirty) {
-      scheduleDraft = {
-        enabled: status.schedule.enabled,
-        mode: status.schedule.mode,
-        grace_minutes: status.schedule.grace_minutes,
-        windows: [...(status.schedule.windows || [])],
-      };
-      document.getElementById('sched-enabled').checked = scheduleDraft.enabled;
-      document.getElementById('sched-mode').value = scheduleDraft.mode;
-      document.getElementById('sched-grace').value = scheduleDraft.grace_minutes;
-    }
-    renderWindows();
+    renderCountdown();
   } catch (err) {
-    stateLine.textContent = err.message;
-    stateLine.style.color = '#b91c1c';
+    actionLine.textContent = err.message;
+    actionLine.style.color = '#b91c1c';
     latestStatus = null;
-    summaryNextShutdown.textContent = 'None';
+    renderCountdown();
   }
 }
 
 function message(text) {
-  stateLine.textContent = text;
-  stateLine.style.color = '#0b6bcb';
-  setTimeout(refresh, 300);
+  actionLine.textContent = text;
+  actionLine.style.color = '#1f6feb';
+  setTimeout(refresh, 250);
 }
 
 document.getElementById('timer-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const minutes = Number(document.getElementById('timer-minutes').value);
+  const minutes = Number(timerInput.value);
   await api('/api/timer', 'POST', { minutes });
+  timerTotalSeconds = Math.max(1, Math.floor(minutes * 60));
+  lastBeepSecond = null;
   message(`Timer set for ${minutes} minutes.`);
 });
 
 document.getElementById('cancel-timer').onclick = async () => {
   await api('/api/timer/cancel', 'POST', {});
+  timerTotalSeconds = null;
+  lastBeepSecond = null;
   message('Timer canceled.');
 };
 
-document.getElementById('add-window').onclick = () => {
-  const day = document.getElementById('win-day').value;
-  const start = document.getElementById('win-start').value;
-  const end = document.getElementById('win-end').value;
-  if (!start || !end) {
-    stateLine.textContent = 'Start and end time are required.';
-    stateLine.style.color = '#b91c1c';
-    return;
-  }
-  scheduleDirty = true;
-  scheduleDraft.windows.push({ day, start, end });
-  renderWindows();
-};
+document.querySelectorAll('[data-minutes]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    unlockAudio();
+    const minutes = Number(btn.getAttribute('data-minutes'));
+    timerInput.value = String(minutes);
+    await api('/api/timer', 'POST', { minutes });
+    timerTotalSeconds = minutes * 60;
+    lastBeepSecond = null;
+    message(`Timer set for ${minutes} minutes.`);
+  });
+});
 
-document.getElementById('save-schedule').onclick = async () => {
-  scheduleDraft.enabled = document.getElementById('sched-enabled').checked;
-  scheduleDraft.mode = document.getElementById('sched-mode').value;
-  scheduleDraft.grace_minutes = Number(document.getElementById('sched-grace').value);
-  await api('/api/schedule', 'POST', scheduleDraft);
-  scheduleDirty = false;
-  message('Schedule saved.');
-};
-
-document.getElementById('override-none').onclick = async () => {
-  await api('/api/override', 'POST', { mode: 'none' });
-  message('Override disabled.');
-};
-
-document.getElementById('override-perm').onclick = async () => {
-  await api('/api/override', 'POST', { mode: 'permanent' });
-  message('Permanent override enabled.');
-};
-
-document.getElementById('override-temp-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const minutes = Number(document.getElementById('override-minutes').value);
-  await api('/api/override', 'POST', { mode: 'temporary', minutes });
-  message(`Temporary override enabled for ${minutes} minutes.`);
+['pointerdown', 'keydown', 'touchstart'].forEach((eventName) => {
+  window.addEventListener(eventName, unlockAudio, { once: true, passive: true });
 });
 
 refresh();
 setInterval(refresh, 5000);
 setInterval(() => {
   if (!latestStatus) return;
-  const tickNow = new Date();
-  latestStatus = { ...latestStatus, now: tickNow.toISOString() };
-  renderNextShutdown();
-}, 1000);
+  latestStatus = { ...latestStatus, now: new Date().toISOString() };
+  renderCountdown();
+}, 250);
