@@ -2,8 +2,6 @@
 
 A self-hosted service to turn off LG TV after N minutes
 
-## Screenshot
-
 ![Aegis app screenshot](docs/aegis-ui.png)
 
 ## Run

@@ -8,7 +8,6 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8787
-      TZ_NAME: America/Los_Angeles
       LG_TV_HOST_CACHE_FILE: /data/lgtv-host.txt
       LG_TV_KEY_FILE: /data/lgtv-key.json
       POWER_OFF_CMD: "python /app/scripts/lg_poweroff.py"

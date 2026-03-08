@@ -8,26 +8,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-try:
-    from zoneinfo import ZoneInfo
-except Exception:  # pragma: no cover
-    ZoneInfo = None
-
 ENFORCER_TICK_SECONDS = 1.0
 
 
 class ControllerState:
-    def __init__(self, tz_name: str):
+    def __init__(self):
         self.lock = threading.RLock()
-        self.tz_name = tz_name
-        self.tz = ZoneInfo(tz_name) if ZoneInfo else None
         self.timer_off_at: Optional[datetime] = None
         self.last_action: Optional[str] = None
         self.last_action_at: Optional[datetime] = None
 
     def now(self) -> datetime:
-        if self.tz:
-            return datetime.now(self.tz)
         return datetime.now()
 
     def to_json(self) -> Dict[str, Any]:
@@ -35,7 +26,6 @@ class ControllerState:
             now = self.now()
             return {
                 "now": now.isoformat(),
-                "timezone": self.tz_name,
                 "timer_off_at": self.timer_off_at.isoformat() if self.timer_off_at else None,
                 "last_action": self.last_action,
                 "last_action_at": self.last_action_at.isoformat() if self.last_action_at else None,
@@ -212,9 +202,8 @@ class AppHandler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8787"))
-    timezone = os.getenv("TZ_NAME", "America/Los_Angeles")
 
-    state = ControllerState(timezone)
+    state = ControllerState()
     power = PowerController()
     enforcer = Enforcer(state, power)
 
@@ -223,7 +212,7 @@ def main() -> None:
     server = ThreadingHTTPServer((host, port), AppHandler)
 
     enforcer.start()
-    print(f"aegis listening on http://{host}:{port} (timezone={timezone})", flush=True)
+    print(f"aegis listening on http://{host}:{port}", flush=True)
 
     try:
         server.serve_forever()
