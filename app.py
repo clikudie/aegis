@@ -18,21 +18,6 @@ class ControllerState:
         self.last_action: Optional[str] = None
         self.last_action_at: Optional[datetime] = None
 
-    def now(self) -> datetime:
-        return datetime.now()
-
-    def to_json(self) -> Dict[str, Any]:
-        with self.lock:
-            now = self.now()
-            return {
-                "now": now.isoformat(),
-                "timer_off_at": self.timer_off_at.isoformat() if self.timer_off_at else None,
-                "last_action": self.last_action,
-                "last_action_at": self.last_action_at.isoformat() if self.last_action_at else None,
-                "next_shutdown_at": self.timer_off_at.isoformat() if self.timer_off_at else None,
-                "next_shutdown_reason": "timer" if self.timer_off_at else None,
-            }
-
 
 class PowerController:
     def __init__(self):
@@ -145,9 +130,6 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self._canonical_path()
-        if path == "/status":
-            self._send_json(HTTPStatus.OK, self.state.to_json())
-            return
         if path == "/" and self._serve_static("index.html"):
             return
         if path.startswith("/static/") and self._serve_static(path.removeprefix("/static/")):

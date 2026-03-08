@@ -45,9 +45,6 @@ docker compose exec aegis python /app/scripts/lg_poweroff.py
 
 ## API
 
-### `GET /status`
-Returns current timer and last action fields.
-
 ### `POST /timer`
 
 ```json
