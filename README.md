@@ -41,8 +41,6 @@ Test power-off:
 docker compose exec aegis python /app/scripts/lg_poweroff.py
 ```
 
-
-
 ## API
 
 ### `POST /timer`

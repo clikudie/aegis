@@ -52,7 +52,7 @@ class Enforcer:
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
-            now = self.state.now()
+            now = datetime.now()
             with self.state.lock:
                 self._handle_timer(now)
             self.stop_event.wait(ENFORCER_TICK_SECONDS)
@@ -130,6 +130,19 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self._canonical_path()
+        if path == "/status":
+            with self.state.lock:
+                now = datetime.now()
+                payload = {
+                    "now": now.isoformat(),
+                    "timer_off_at": self.state.timer_off_at.isoformat() if self.state.timer_off_at else None,
+                    "last_action": self.state.last_action,
+                    "last_action_at": self.state.last_action_at.isoformat() if self.state.last_action_at else None,
+                    "next_shutdown_at": self.state.timer_off_at.isoformat() if self.state.timer_off_at else None,
+                    "next_shutdown_reason": "timer" if self.state.timer_off_at else None,
+                }
+            self._send_json(HTTPStatus.OK, payload)
+            return
         if path == "/" and self._serve_static("index.html"):
             return
         if path.startswith("/static/") and self._serve_static(path.removeprefix("/static/")):
@@ -169,7 +182,7 @@ class AppHandler(BaseHTTPRequestHandler):
             raise ValueError("minutes must be > 0")
 
         with self.state.lock:
-            self.state.timer_off_at = self.state.now() + timedelta(minutes=minutes)
+            self.state.timer_off_at = datetime.now() + timedelta(minutes=minutes)
         self._send_json(HTTPStatus.OK, {"ok": True, "timer_off_at": self.state.timer_off_at.isoformat()})
 
     def _post_timer_cancel(self) -> None:

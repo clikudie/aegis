@@ -6,7 +6,7 @@ const countdownCard = document.getElementById('countdown-card');
 const timerInput = document.getElementById('timer-minutes');
 const ring = document.getElementById('countdown-ring');
 
-let latestStatus = null;
+let shutdownAtMs = null;
 let timerTotalSeconds = null;
 let lastBeepSecond = null;
 let audioCtx = null;
@@ -89,7 +89,7 @@ function beepWarning(remainingSec) {
 }
 
 function renderCountdown() {
-  if (!latestStatus || !latestStatus.next_shutdown_at) {
+  if (!shutdownAtMs) {
     timerTotalSeconds = null;
     lastBeepSecond = null;
     timerStateEl.textContent = 'Idle';
@@ -100,19 +100,7 @@ function renderCountdown() {
     return;
   }
 
-  const now = new Date(latestStatus.now || Date.now());
-  const at = new Date(latestStatus.next_shutdown_at);
-  if (Number.isNaN(at.valueOf())) {
-    timerStateEl.textContent = 'Armed';
-    timerCountdownEl.textContent = '--:--';
-    timerEtaEl.textContent = 'Shutdown scheduled';
-    countdownCard.classList.add('active');
-    countdownCard.classList.remove('warning');
-    setRingProgress(1);
-    return;
-  }
-
-  const remainingSec = Math.max(0, Math.ceil((at.getTime() - now.getTime()) / 1000));
+  const remainingSec = Math.max(0, Math.ceil((shutdownAtMs - Date.now()) / 1000));
   if (timerTotalSeconds == null || remainingSec > timerTotalSeconds) {
     timerTotalSeconds = remainingSec;
   }
@@ -121,7 +109,7 @@ function renderCountdown() {
   setRingProgress(progress);
 
   timerCountdownEl.textContent = toMMSS(remainingSec);
-  timerEtaEl.textContent = `Shutdown at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  timerEtaEl.textContent = `Shutdown at ${new Date(shutdownAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 
   countdownCard.classList.add('active');
   if (remainingSec <= 10 && remainingSec > 0) {
@@ -137,50 +125,78 @@ function renderCountdown() {
   }
 }
 
+function message(text) {
+  actionLine.textContent = text;
+  actionLine.style.color = '#1f6feb';
+}
+
+function errorMessage(err) {
+  actionLine.textContent = err.message || 'Request failed';
+  actionLine.style.color = '#b91c1c';
+}
+
 async function refresh() {
   try {
     const status = await api('/api/status');
-    latestStatus = status;
+    shutdownAtMs = status.next_shutdown_at ? new Date(status.next_shutdown_at).getTime() : null;
+    if (!shutdownAtMs) {
+      timerTotalSeconds = null;
+      lastBeepSecond = null;
+    }
     renderCountdown();
   } catch (err) {
-    actionLine.textContent = err.message;
-    actionLine.style.color = '#b91c1c';
-    latestStatus = null;
+    errorMessage(err);
+    shutdownAtMs = null;
     renderCountdown();
   }
 }
 
-function message(text) {
-  actionLine.textContent = text;
-  actionLine.style.color = '#1f6feb';
-  setTimeout(refresh, 250);
-}
-
 document.getElementById('timer-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const minutes = Number(timerInput.value);
-  await api('/api/timer', 'POST', { minutes });
-  timerTotalSeconds = Math.max(1, Math.floor(minutes * 60));
-  lastBeepSecond = null;
-  message(`Timer set for ${minutes} minutes.`);
+  try {
+    const minutes = Number(timerInput.value);
+    const data = await api('/api/timer', 'POST', { minutes });
+    shutdownAtMs = data.timer_off_at ? new Date(data.timer_off_at).getTime() : Date.now() + Math.floor(minutes * 60) * 1000;
+    timerTotalSeconds = Math.max(1, Math.floor(minutes * 60));
+    lastBeepSecond = null;
+    message(`Timer set for ${minutes} minutes.`);
+    renderCountdown();
+    setTimeout(refresh, 250);
+  } catch (err) {
+    errorMessage(err);
+  }
 });
 
 document.getElementById('cancel-timer').onclick = async () => {
-  await api('/api/timer/cancel', 'POST', {});
-  timerTotalSeconds = null;
-  lastBeepSecond = null;
-  message('Timer canceled.');
+  try {
+    await api('/api/timer/cancel', 'POST', {});
+    shutdownAtMs = null;
+    timerTotalSeconds = null;
+    lastBeepSecond = null;
+    message('Timer canceled.');
+    renderCountdown();
+    setTimeout(refresh, 250);
+  } catch (err) {
+    errorMessage(err);
+  }
 };
 
 document.querySelectorAll('[data-minutes]').forEach((btn) => {
   btn.addEventListener('click', async () => {
-    unlockAudio();
-    const minutes = Number(btn.getAttribute('data-minutes'));
-    timerInput.value = String(minutes);
-    await api('/api/timer', 'POST', { minutes });
-    timerTotalSeconds = minutes * 60;
-    lastBeepSecond = null;
-    message(`Timer set for ${minutes} minutes.`);
+    try {
+      unlockAudio();
+      const minutes = Number(btn.getAttribute('data-minutes'));
+      timerInput.value = String(minutes);
+      const data = await api('/api/timer', 'POST', { minutes });
+      shutdownAtMs = data.timer_off_at ? new Date(data.timer_off_at).getTime() : Date.now() + Math.floor(minutes * 60) * 1000;
+      timerTotalSeconds = minutes * 60;
+      lastBeepSecond = null;
+      message(`Timer set for ${minutes} minutes.`);
+      renderCountdown();
+      setTimeout(refresh, 250);
+    } catch (err) {
+      errorMessage(err);
+    }
   });
 });
 
@@ -190,8 +206,4 @@ document.querySelectorAll('[data-minutes]').forEach((btn) => {
 
 refresh();
 setInterval(refresh, 5000);
-setInterval(() => {
-  if (!latestStatus) return;
-  latestStatus = { ...latestStatus, now: new Date().toISOString() };
-  renderCountdown();
-}, 250);
+setInterval(renderCountdown, 250);
