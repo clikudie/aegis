@@ -146,7 +146,6 @@ async function refresh() {
     renderCountdown();
   } catch (err) {
     errorMessage(err);
-    shutdownAtMs = null;
     renderCountdown();
   }
 }
