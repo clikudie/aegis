@@ -10,7 +10,6 @@ COPY scripts /app/scripts
 
 ENV HOST=0.0.0.0 \
     PORT=8787 \
-    TZ_NAME=America/Los_Angeles \
     STATE_FILE=/data/state.json \
     LG_TV_KEY_FILE=/data/lgtv-key.json
 
