@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
@@ -65,7 +65,7 @@ class Enforcer:
     def _run(self) -> None:
         while not self.stop_event.is_set():
             with self.state.lock:
-                self._handle_timer(datetime.now())
+                self._handle_timer(datetime.now(timezone.utc))
             self.stop_event.wait(ENFORCER_TICK_SECONDS)
 
     def _handle_timer(self, now: datetime) -> None:
@@ -150,7 +150,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if path == "/status":
             state = self._state()
             with state.lock:
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
                 payload = {
                     "now": now.isoformat(),
                     "timer_off_at": state.timer_off_at.isoformat() if state.timer_off_at else None,
@@ -201,7 +201,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
         state = self._state()
         with state.lock:
-            state.timer_off_at = datetime.now() + timedelta(minutes=minutes)
+            state.timer_off_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
         self._send_json(HTTPStatus.OK, {"ok": True, "timer_off_at": state.timer_off_at.isoformat()})
 
     def _post_timer_cancel(self) -> None:
