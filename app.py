@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -32,7 +34,16 @@ class PowerController:
         if not self.cmd:
             print("aegis action: power_off no-op (POWER_OFF_CMD unset)", flush=True)
             return True
-        rc = os.system(self.cmd)
+        try:
+            argv = shlex.split(self.cmd)
+        except ValueError as exc:
+            print(f"aegis action: power_off invalid_command error={exc}", flush=True)
+            return False
+        if not argv:
+            print("aegis action: power_off invalid_command error=empty command", flush=True)
+            return False
+        result = subprocess.run(argv, check=False)
+        rc = result.returncode
         print(f"aegis action: power_off command_exit={rc}", flush=True)
         return rc == 0
 
