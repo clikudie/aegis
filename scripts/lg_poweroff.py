@@ -23,8 +23,12 @@ LAN_SWEEP_WORKERS = 64
 def load_store(path: Path) -> dict:
     if not path.exists():
         return {}
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Warning: failed to load key store {path}: {exc}; continuing with empty store.", file=sys.stderr)
+        return {}
 
 
 def save_store(path: Path, store: dict) -> None:
