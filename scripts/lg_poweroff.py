@@ -70,17 +70,20 @@ def discover_webos_hosts(timeout_seconds: float = SSDP_DISCOVERY_TIMEOUT_SECONDS
     seen: set[str] = set()
     found: list[str] = []
     with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)) as sock:
-        sock.settimeout(timeout_seconds)
-        sock.sendto(request, SSDP_MULTICAST_ADDR)
-        while True:
-            try:
-                _, addr = sock.recvfrom(2048)
-            except socket.timeout:
-                break
-            host = addr[0]
-            if host not in seen:
-                seen.add(host)
-                found.append(host)
+        try:
+            sock.settimeout(timeout_seconds)
+            sock.sendto(request, SSDP_MULTICAST_ADDR)
+            while True:
+                try:
+                    _, addr = sock.recvfrom(2048)
+                except socket.timeout:
+                    break
+                host = addr[0]
+                if host not in seen:
+                    seen.add(host)
+                    found.append(host)
+        except OSError:
+            return []
     return found
 
 
@@ -111,8 +114,8 @@ def probe_webos_ssdp_unicast(host: str, timeout_seconds: float = LAN_SWEEP_TIMEO
         "\r\n"
     ).encode("utf-8")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.settimeout(timeout_seconds)
     try:
+        sock.settimeout(timeout_seconds)
         sock.sendto(request, (host, 1900))
         while True:
             try:
@@ -124,6 +127,8 @@ def probe_webos_ssdp_unicast(host: str, timeout_seconds: float = LAN_SWEEP_TIMEO
             text = payload.decode("utf-8", errors="ignore").lower()
             if SSDP_WEBOS_ST in text:
                 return True
+    except OSError:
+        return False
     finally:
         sock.close()
 
@@ -131,10 +136,12 @@ def probe_webos_ssdp_unicast(host: str, timeout_seconds: float = LAN_SWEEP_TIMEO
 def probe_webos_ports_quick(host: str, timeout_seconds: float = LAN_SWEEP_TIMEOUT_SECONDS) -> bool:
     for port in (3001, 3000):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout_seconds)
         try:
+            sock.settimeout(timeout_seconds)
             if sock.connect_ex((host, port)) == 0:
                 return True
+        except OSError:
+            continue
         finally:
             sock.close()
     return False
