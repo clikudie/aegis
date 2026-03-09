@@ -162,6 +162,44 @@ def unique_hosts(hosts: list[str]) -> list[str]:
     return out
 
 
+def try_hosts(
+    hosts: list[str],
+    store: dict,
+    key_path: Path,
+    host_cache_path: Path | None,
+    pair_only: bool,
+) -> tuple[bool, Exception | None]:
+    last_error: Exception | None = None
+    for host in hosts:
+        for secure in (False, True):
+            client = WebOSClient(host, secure=secure)
+            try:
+                client.connect()
+                for status in client.register(store):
+                    if status == WebOSClient.PROMPTED:
+                        print("Accept the pairing prompt on TV...")
+                    elif status == WebOSClient.REGISTERED:
+                        save_store(key_path, store)
+                        break
+
+                save_cached_host(host_cache_path, host)
+                if pair_only:
+                    print(f"Pairing complete. Key saved to {key_path}; host={host} (secure={secure})")
+                    return True, None
+
+                SystemControl(client).power_off()
+                print(f"Power-off command sent successfully. host={host} (secure={secure})")
+                return True, None
+            except Exception as exc:
+                last_error = exc
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+    return False, last_error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="LG webOS pair/poweroff helper")
     parser.add_argument("--host", default=os.getenv("LG_TV_HOST"), help="TV IP/hostname")
@@ -182,44 +220,26 @@ def main() -> int:
     host_cache_path = Path(args.host_cache_file) if args.host_cache_file else None
     store = load_store(key_path)
     primary_hosts = unique_hosts([args.host or "", load_cached_host(host_cache_path)])
+
+    ok, last_error = try_hosts(primary_hosts, store, key_path, host_cache_path, args.pair_only)
+    if ok:
+        return 0
+
     fallback_hosts: list[str] = []
     for _ in range(SSDP_DISCOVERY_ATTEMPTS):
         fallback_hosts.extend(discover_webos_hosts())
     for seed in primary_hosts:
         fallback_hosts.extend(sweep_subnet_for_webos(seed))
-    hosts = unique_hosts(primary_hosts + fallback_hosts)
-    if not hosts:
+    discovered_hosts = unique_hosts(fallback_hosts)
+    if not primary_hosts and not discovered_hosts:
         print("No LG TV host found. Set --host, or keep TV/phone on same LAN for discovery.", file=sys.stderr)
         return 1
 
-    last_error: Exception | None = None
-    for host in hosts:
-        for secure in (False, True):
-            client = WebOSClient(host, secure=secure)
-            try:
-                client.connect()
-                for status in client.register(store):
-                    if status == WebOSClient.PROMPTED:
-                        print("Accept the pairing prompt on TV...")
-                    elif status == WebOSClient.REGISTERED:
-                        save_store(key_path, store)
-                        break
-
-                save_cached_host(host_cache_path, host)
-                if args.pair_only:
-                    print(f"Pairing complete. Key saved to {key_path}; host={host} (secure={secure})")
-                    return 0
-
-                SystemControl(client).power_off()
-                print(f"Power-off command sent successfully. host={host} (secure={secure})")
-                return 0
-            except Exception as exc:
-                last_error = exc
-            finally:
-                try:
-                    client.close()
-                except Exception:
-                    pass
+    ok, discovered_error = try_hosts(discovered_hosts, store, key_path, host_cache_path, args.pair_only)
+    if ok:
+        return 0
+    if discovered_error is not None:
+        last_error = discovered_error
 
     print(f"LG control error: {last_error}", file=sys.stderr)
     return 2
