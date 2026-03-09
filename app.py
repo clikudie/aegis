@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,12 +12,12 @@ from urllib.parse import urlparse
 ENFORCER_TICK_SECONDS = 1.0
 
 
+@dataclass
 class ControllerState:
-    def __init__(self):
-        self.lock = threading.RLock()
-        self.timer_off_at: Optional[datetime] = None
-        self.last_action: Optional[str] = None
-        self.last_action_at: Optional[datetime] = None
+    lock: threading.RLock = field(default_factory=threading.RLock)
+    timer_off_at: Optional[datetime] = None
+    last_action: Optional[str] = None
+    last_action_at: Optional[datetime] = None
 
 
 class PowerController:
@@ -52,9 +53,8 @@ class Enforcer:
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
-            now = datetime.now()
             with self.state.lock:
-                self._handle_timer(now)
+                self._handle_timer(datetime.now())
             self.stop_event.wait(ENFORCER_TICK_SECONDS)
 
     def _handle_timer(self, now: datetime) -> None:
@@ -74,8 +74,14 @@ class Enforcer:
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    state: ControllerState = None  # type: ignore
+    state: Optional[ControllerState] = None
     static_base: str = ""
+
+    def _state(self) -> ControllerState:
+        state = self.state
+        if state is None:
+            raise RuntimeError("AppHandler.state must be initialized before handling requests")
+        return state
 
     def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -131,15 +137,16 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self._canonical_path()
         if path == "/status":
-            with self.state.lock:
+            state = self._state()
+            with state.lock:
                 now = datetime.now()
                 payload = {
                     "now": now.isoformat(),
-                    "timer_off_at": self.state.timer_off_at.isoformat() if self.state.timer_off_at else None,
-                    "last_action": self.state.last_action,
-                    "last_action_at": self.state.last_action_at.isoformat() if self.state.last_action_at else None,
-                    "next_shutdown_at": self.state.timer_off_at.isoformat() if self.state.timer_off_at else None,
-                    "next_shutdown_reason": "timer" if self.state.timer_off_at else None,
+                    "timer_off_at": state.timer_off_at.isoformat() if state.timer_off_at else None,
+                    "last_action": state.last_action,
+                    "last_action_at": state.last_action_at.isoformat() if state.last_action_at else None,
+                    "next_shutdown_at": state.timer_off_at.isoformat() if state.timer_off_at else None,
+                    "next_shutdown_reason": "timer" if state.timer_off_at else None,
                 }
             self._send_json(HTTPStatus.OK, payload)
             return
@@ -181,13 +188,15 @@ class AppHandler(BaseHTTPRequestHandler):
         if minutes <= 0:
             raise ValueError("minutes must be > 0")
 
-        with self.state.lock:
-            self.state.timer_off_at = datetime.now() + timedelta(minutes=minutes)
-        self._send_json(HTTPStatus.OK, {"ok": True, "timer_off_at": self.state.timer_off_at.isoformat()})
+        state = self._state()
+        with state.lock:
+            state.timer_off_at = datetime.now() + timedelta(minutes=minutes)
+        self._send_json(HTTPStatus.OK, {"ok": True, "timer_off_at": state.timer_off_at.isoformat()})
 
     def _post_timer_cancel(self) -> None:
-        with self.state.lock:
-            self.state.timer_off_at = None
+        state = self._state()
+        with state.lock:
+            state.timer_off_at = None
         self._send_json(HTTPStatus.OK, {"ok": True, "timer_off_at": None})
 
     def log_message(self, format: str, *args: Any) -> None:  # pragma: no cover
